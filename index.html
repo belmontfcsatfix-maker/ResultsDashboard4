@@ -68,6 +68,14 @@ body { background:var(--dark); font-family:'DM Sans',sans-serif; color:var(--tex
   gap:10px;
   align-items:start;
 }
+/* Match Day filter bar has 4 boxes (not 5) — its own column count,
+   but shares the same responsive collapse behaviour as .filters-grid below. */
+.md-filters-grid {
+  display:grid;
+  grid-template-columns: auto auto auto auto;
+  gap:10px;
+  align-items:start;
+}
 /* Filter box */
 .fbox {
   background:var(--fbox);
@@ -208,12 +216,13 @@ td.loccol { font-size:0.78rem; color:var(--muted); max-width:160px; overflow:hid
 
 @media (max-width:900px) {
   .filters-grid { grid-template-columns:repeat(3,auto) auto auto; }
+  .md-filters-grid { grid-template-columns:repeat(2,auto) auto auto; }
   .fbox-reset { flex-direction:row; justify-content:flex-start; }
 }
 @media (max-width:600px) {
   .header,.stats,.filters-bar,.twrap-outer { padding-left:12px; padding-right:12px; }
   .stats-page { padding-left:12px; padding-right:12px; }
-  .filters-grid { grid-template-columns:1fr; }
+  .filters-grid, .md-filters-grid { grid-template-columns:1fr; }
   .pill,.pill-np { flex:1 1 calc(50% - 6px); }
 }
 
@@ -346,7 +355,7 @@ td.loccol { font-size:0.78rem; color:var(--muted); max-width:160px; overflow:hid
 
 <!-- ── MATCH DAY FILTER BAR ── -->
 <div id="md-filters-bar" class="filters-bar">
-  <div class="filters-grid" style="grid-template-columns:auto auto auto auto;">
+  <div class="filters-grid md-filters-grid">
 
     <!-- Box 1: Filter by Date -->
     <div class="fbox">
@@ -372,8 +381,19 @@ td.loccol { font-size:0.78rem; color:var(--muted); max-width:160px; overflow:hid
     <div class="fbox">
       <div class="fbox-title">Filter by Age Group</div>
       <div class="fbox-body">
-        <button id="md-age-all-btn" class="btn" onclick="mdToggleAllAges()">All Ages</button>
-        <div id="md-age-btns" style="display:contents;"></div>
+        <div class="msdrop" id="md-age-dropdown">
+          <button type="button" id="md-age-trigger" class="msdrop-trigger" onclick="mdToggleAgeDropdown()">
+            <span id="md-age-trigger-label">All Ages</span>
+            <svg class="msdrop-caret" width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M0 3l4.5 4.5L9 3z" fill="currentColor"/></svg>
+          </button>
+          <div class="msdrop-panel" id="md-age-panel">
+            <div class="msdrop-actions">
+              <button type="button" class="msdrop-action" onclick="mdToggleAllAges()">Select All</button>
+              <button type="button" class="msdrop-action" onclick="mdClearAllAges()">Clear</button>
+            </div>
+            <div class="msdrop-options" id="md-age-options"></div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -563,16 +583,6 @@ function mdVisibleTps() {
   return (window._mdAllTournaments || []).filter(t => availableTps.has(t) || sel.has(t));
 }
 
-// Hide/show individual Age Group buttons based on current Date + Championship selection
-function mdRefreshAgeButtonVisibility() {
-  const visible = new Set(mdVisibleAges());
-  (window._mdAllAges || []).forEach(age => {
-    const btn = document.getElementById(`md-age-btn-${age.replace(/[^a-zA-Z0-9]/g,'_')}`);
-    if (!btn) return;
-    btn.style.display = visible.has(age) ? '' : 'none';
-  });
-}
-
 // Hide/show individual Championship buttons based on current Date + Age Group selection
 function mdRefreshTournamentButtonVisibility() {
   const visible = new Set(mdVisibleTps());
@@ -587,7 +597,7 @@ function mdRefreshTournamentButtonVisibility() {
 // time any one of the three selections changes.
 function mdRefreshFilterAvailability() {
   mdRenderDateOptions(window._mdAllDates || []);
-  mdRefreshAgeButtonVisibility();
+  mdRenderAgeOptions(window._mdAllAges || []);
   mdRefreshTournamentButtonVisibility();
   mdRefreshAllBtnStyle();
   mdRefreshAgeAllBtnStyle();
@@ -629,12 +639,30 @@ function mdToggleAge(age) {
 }
 
 function mdRefreshAgeAllBtnStyle() {
-  const btn = document.getElementById('md-age-all-btn');
-  if (!btn) return;
+  const allAges = window._mdAllAges || [];
+  const sel = window._mdSelectedAges || new Set();
   const visible = mdVisibleAges();
-  const sel = window._mdSelectedAges;
-  const allSelected = sel && visible.length > 0 && sel.size === visible.length && visible.every(a => sel.has(a));
-  btn.classList.toggle('active', !!allSelected);
+  const allSelected = visible.length > 0 && sel.size === visible.length && visible.every(a => sel.has(a));
+
+  // Update dropdown trigger label
+  const labelEl = document.getElementById('md-age-trigger-label');
+  if (labelEl) {
+    if (sel.size === 0 || allSelected) {
+      labelEl.textContent = 'All Ages';
+    } else if (sel.size === 1) {
+      labelEl.textContent = [...sel][0];
+    } else {
+      labelEl.textContent = `${sel.size} Ages Selected`;
+    }
+  }
+  const trigger = document.getElementById('md-age-trigger');
+  if (trigger) trigger.classList.toggle('active', sel.size > 0 && !allSelected);
+
+  // Sync checkbox states
+  allAges.forEach(age => {
+    const cb = document.getElementById(`md-age-opt-${age.replace(/[^a-zA-Z0-9]/g,'_')}`);
+    if (cb) cb.checked = sel.has(age);
+  });
 }
 
 function mdUpdateActiveCount() {
@@ -705,13 +733,6 @@ function mdResetAll() {
 }
 
 function mdApplyAgeFilter() {
-  const allAges = window._mdAllAges || [];
-  const sel = window._mdSelectedAges || new Set();
-  allAges.forEach(age => {
-    const btn = document.getElementById(`md-age-btn-${age.replace(/[^a-zA-Z0-9]/g,'_')}`);
-    if (!btn) return;
-    btn.classList.toggle('active', sel.has(age));
-  });
   mdRefreshFilterAvailability();
   mdUpdateActiveCount();
   if (window._renderMatchDayFiltered) window._renderMatchDayFiltered();
@@ -851,11 +872,21 @@ function mdToggleDateDropdown(forceState) {
   const newState = typeof forceState === 'boolean' ? forceState : !isOpen;
   dropdown.classList.toggle('open', newState);
 }
+
+// ── Age Group dropdown open/close ──
+function mdToggleAgeDropdown(forceState) {
+  const dropdown = document.getElementById('md-age-dropdown');
+  if (!dropdown) return;
+  const isOpen = dropdown.classList.contains('open');
+  const newState = typeof forceState === 'boolean' ? forceState : !isOpen;
+  dropdown.classList.toggle('open', newState);
+}
+
+// Close any open msdrop dropdown (Date, Age Group, etc.) when clicking outside it
 document.addEventListener('click', function(e) {
-  const dropdown = document.getElementById('md-date-dropdown');
-  if (dropdown && dropdown.classList.contains('open') && !dropdown.contains(e.target)) {
-    mdToggleDateDropdown(false);
-  }
+  document.querySelectorAll('.msdrop.open').forEach(dropdown => {
+    if (!dropdown.contains(e.target)) dropdown.classList.remove('open');
+  });
 });
 
 // Build the checkbox option list inside the date dropdown panel.
@@ -876,6 +907,28 @@ function mdRenderDateOptions(allDatesArg, testMode) {
     return `<label class="msdrop-option" for="${id}">
       <input type="checkbox" id="${id}" ${checked?'checked':''} onchange="mdToggleDate('${d.fmt}')">
       <span>${d.fmt}${testMode?' <span style="font-size:0.58rem;opacity:0.7;">(test)</span>':''}</span>
+    </label>`;
+  }).join('');
+}
+
+// Build the checkbox option list inside the Age Group dropdown panel.
+// Only ages that still have a matching game given the current Date +
+// Championship selection are listed (mutual exclusivity), unless already selected.
+function mdRenderAgeOptions(allAgesArg, testMode) {
+  const optsEl = document.getElementById('md-age-options');
+  if (!optsEl) return;
+  const sel = window._mdSelectedAges || new Set();
+  let listToRender = allAgesArg;
+  if (!testMode) {
+    const visibleSet = new Set(mdVisibleAges());
+    listToRender = allAgesArg.filter(a => visibleSet.has(a));
+  }
+  optsEl.innerHTML = listToRender.map(age => {
+    const id = `md-age-opt-${age.replace(/[^a-zA-Z0-9]/g,'_')}`;
+    const checked = sel.has(age);
+    return `<label class="msdrop-option" for="${id}">
+      <input type="checkbox" id="${id}" ${checked?'checked':''} onchange="mdToggleAge('${age}')">
+      <span>${age}</span>
     </label>`;
   }).join('');
 }
@@ -1030,14 +1083,7 @@ function renderMatchDay() {
   if (!window._mdSelectedAges) window._mdSelectedAges = new Set();
   else { for (const a of [...window._mdSelectedAges]) { if (!allAges.includes(a)) window._mdSelectedAges.delete(a); } }
 
-  const ageBtnsEl = document.getElementById('md-age-btns');
-  if (ageBtnsEl) {
-    ageBtnsEl.innerHTML = allAges.map(age => {
-      const id = `md-age-btn-${age.replace(/[^a-zA-Z0-9]/g,'_')}`;
-      const active = window._mdSelectedAges.has(age);
-      return `<button id="${id}" class="btn${active?' active':''}" onclick="mdToggleAge('${age}')">${age}</button>`;
-    }).join('');
-  }
+  mdRenderAgeOptions(allAges);
   mdRefreshAgeAllBtnStyle();
 
   // ── Sync Championship filter button states (multiselect) ──
